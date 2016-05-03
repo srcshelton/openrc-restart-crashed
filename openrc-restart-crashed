@@ -1,0 +1,120 @@
+#!/bin/bash
+# Copyright 2016 Stuart Shelton
+# Distributed under the terms of the GNU General Public License v2
+
+verbose="${VERBOSE:-1}"
+
+# Edit the list below to specify those services which should be restarted on
+# failure, rather than only generating an alert:
+rc_monitor_restart=(
+	apache
+	dovecot
+	mysql
+	opendkim
+	postfix
+	postgres
+)
+
+einfo="echo"
+ewarn="echo"
+eerror="echo"
+ebegin="echo"
+eend=":"
+
+if [[ -r /lib/rc/sh/functions.sh ]]; then
+	source /lib/rc/sh/functions.sh
+	# Sets 'RC_GOT_FUNCTIONS="yes"'
+	einfo="einfo"
+	ewarn="einfo"
+	eerror="eerror"
+	ebegin="ebegin"
+	eend="eend"
+fi
+
+if grep -Eq -- ' -(q|-quiet) ' <<<" ${*} "; then
+	EINFO_QUIET=yes
+fi
+if yesno "${EINFO_QUIET}"; then
+	verbose=0
+fi
+
+quiet=""
+(( verbose )) && quiet="--quiet"
+
+if (( EUID )); then
+	if [[ -n "${RC_GOT_FUNCTIONS:-}" ]]; then
+		eerror "Please execute $( basename "${0:-}" ) as UID 0"
+	else
+		echo >&2 "FATAL: Please execute $( basename "${0:-}" ) as UID 0"
+	fi
+	exit 1
+fi
+
+if grep -Eq -- ' -(h|-help) ' <<<" ${*} "; then
+	echo "Usage: $( basename "${0}" ) [--quiet] [-- service_to_restart[,...]]"
+	exit 0
+fi
+
+if grep -Eq -- ' -- ' <<<" ${*} "; then
+	while [[ -n "${1:-}" ]]; do
+		case "${1}" in
+			--)
+				shift
+				break
+				;;
+			*)
+				shift
+				;;
+		esac
+	done
+	if [[ -n "${*// }" ]]; then
+		if grep -q -- ' default ' <<<" ${*} "; then
+			for item in "${@}"; do
+				[[ "${item:-}" != "default" ]] && 
+					! grep -q -- " ${item} " <<<" ${rc_monitor_restart[*]} " &&
+					rc_monitor_restart+=( "${item}" )
+			done
+		else
+			rc_monitor_restart=( "${@}" )
+		fi
+		if (( verbose )); then
+			${einfo} "Serivces which will be restarted if crashed:"
+			${einfo} "$( sed 's/ /, /g' <<<"${rc_monitor_restart[*]}" )"
+		fi
+	fi
+fi
+
+(( verbose )) && ${ebegin} "Checking for crashed services"
+declare -i rc=0
+declare -i monitored=0
+
+for svc in $( rc-status --crashed --all ); do
+	monitored=0
+
+	for chk in "${rc_monitor_restart[@]:-}"; do
+		if [ "${chk}" = "${svc}" ]; then
+			monitored=1
+
+			# We use --nodeps as a restart could stop critical services that
+			# depend on us...
+			declare -i result=0
+			if rc-service "${svc}" -- ${quiet} --nodeps restart; then
+				(( 0 == rc )) && rc=1
+			else
+				result=${?}
+				rc=2
+				${eerror} "Service ${svc} failed to restart: ${result}"
+			fi
+			continue 2
+		fi
+	done
+	if (( monitored )); then
+		${ewarn} "${svc} crashed but requires a manual restart"
+		rc=2
+	else
+		${ewarn} "${svc} crashed but is not monitored and so will not be restarted"
+	fi
+done
+(( verbose )) && ${eend} $(( 2 == rc )) "Crashed services are present which could not be restarted"
+
+exit $(( 0 != rc ))
