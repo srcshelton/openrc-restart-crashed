@@ -18,15 +18,18 @@ are:
 
 ... and further services may be trivially inserted.
 
-`openrc-restart-crashed` is intended to be run regularly from cron:
+`openrc-restart-crashed` is intended to be run regularly from cron - a typical
+`/etc/cron.d/openrc-restart-crashed` might read:
 
 ```
-$ cat /etc/cron.d/openrc-restart-crashed 
 # Global variables
-SHELL=/bin/bash
+SHELL=/bin/sh
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 MAILTO=root
 HOME=/
+
+# Local variables
+services="monit"
 
 #  Fields:
 #   minute              (0-59)
@@ -35,10 +38,10 @@ HOME=/
 #   month of year       (1-12)
 #   day of week         (0-6, Sunday == 0)
 
-* * * * *       root    [[ -x /usr/local/sbin/openrc-restart-crashed ]] && /usr/local/sbin/openrc-restart-crashed --quiet -- monit
+* * * * *       root    test -x /usr/local/sbin/openrc-restart-crashed && /usr/local/sbin/openrc-restart-crashed --quiet -- $services
 
 # vi: set nowrap:
 ```
 
-... would cause any of the services above and also `monit` to be restarted
+... and would cause any of the services above and also `monit` to be restarted
 within a minute if they were marked as crashed by OpenRC.
