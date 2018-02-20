@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2016 Stuart Shelton
+# Copyright 2016-2018 Stuart Shelton
 # Distributed under the terms of the GNU General Public License v2
 
 declare verbose="${VERBOSE:-1}"
@@ -23,6 +23,7 @@ ebegin="echo"
 eend=":"
 
 if [[ -r /lib/rc/sh/functions.sh ]]; then
+	# shellcheck disable=SC1091
 	source /lib/rc/sh/functions.sh
 	# Sets 'RC_GOT_FUNCTIONS="yes"'
 	einfo="einfo"
@@ -110,9 +111,18 @@ for svc in $( rc-status --crashed --all ); do
 			if rc-service "${svc}" -- ${quiet:-} --nodeps restart; then
 				(( 0 == rc )) && rc=1
 			else
+				${eerror} "Service ${svc} failed to restart: ${?}"
+
+				${ewarn} "Attempting to stop then start service ${svc} ..."
+				rc-service "${svc}" -- ${quiet:-} --nodeps stop
+				rc-service "${svc}" -- ${quiet:-} --nodeps start
 				result=${?}
-				rc=2
-				${eerror} "Service ${svc} failed to restart: ${result}"
+				if ! (( result )); then
+					(( 0 == rc )) && rc=1
+				else
+					rc=2
+					${eerror} "Service ${svc} failed to stop/start: ${result}"
+				fi
 			fi
 			continue 2
 		fi
